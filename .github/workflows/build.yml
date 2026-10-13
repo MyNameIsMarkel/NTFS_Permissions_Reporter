@@ -1,0 +1,36 @@
+name: Compilar
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar con csc.exe (.NET Framework 4.x)
+        shell: cmd
+        run: build.bat /ci
+
+      - name: Subir el ejecutable como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: NtfsPermissionsReporter
+          path: dist/NtfsPermissionsReporter.exe
+
+      - name: Publicar en Releases (solo al crear una etiqueta v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/NtfsPermissionsReporter.exe `
+            --title "NTFS Permissions Reporter ${{ github.ref_name }}" --generate-notes
