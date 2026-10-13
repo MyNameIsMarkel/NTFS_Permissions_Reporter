@@ -153,12 +153,29 @@ namespace NtfsReporter
         [ThreadStatic] static byte[] tlsBuf;
 
         // Devuelve un buffer reutilizado por hilo: hay que usarlo antes de la siguiente llamada.
+        // Abre la carpeta en modo copia de seguridad para poder leer los permisos aunque la ACL no lo permita.
         public static byte[] ReadSd(string path, out int err)
         {
             byte[] buf = tlsBuf;
             if (buf == null) { buf = new byte[8192]; tlsBuf = buf; }
             uint need;
             string lp = Paths.Long(path);
+            using (Microsoft.Win32.SafeHandles.SafeFileHandle h = Native.CreateFileW(lp, Native.READ_CONTROL, Native.FILE_SHARE_ALL, IntPtr.Zero,
+                       Native.OPEN_EXISTING, Native.FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero))
+            {
+                if (!h.IsInvalid)
+                {
+                    if (Native.GetKernelObjectSecurity(h, OWNER | DACL, buf, (uint)buf.Length, out need)) { err = 0; return buf; }
+                    err = Marshal.GetLastWin32Error();
+                    if (err == 122 && need > buf.Length)
+                    {
+                        buf = new byte[need]; tlsBuf = buf;
+                        if (Native.GetKernelObjectSecurity(h, OWNER | DACL, buf, (uint)buf.Length, out need)) { err = 0; return buf; }
+                        err = Marshal.GetLastWin32Error();
+                    }
+                }
+            }
+            // alternativa clasica
             if (Native.GetFileSecurityW(lp, OWNER | DACL, buf, (uint)buf.Length, out need)) { err = 0; return buf; }
             err = Marshal.GetLastWin32Error();
             if (err == 122 && need > buf.Length)

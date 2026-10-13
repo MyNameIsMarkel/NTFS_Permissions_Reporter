@@ -38,6 +38,22 @@ namespace NtfsReporter
         public static extern bool GetFileSecurityW(string lpFileName, uint RequestedInformation, byte[] pSecurityDescriptor,
             uint nLength, out uint lpnLengthNeeded);
 
+        // Apertura con FILE_FLAG_BACKUP_SEMANTICS: con el privilegio de copia de seguridad
+        // (Administradores / Operadores de copia del servidor) permite leer aunque la ACL no nos deje.
+        public const uint READ_CONTROL = 0x20000, FILE_LIST_DIRECTORY = 0x1, SYNCHRONIZE = 0x100000;
+        public const uint FILE_SHARE_ALL = 7, OPEN_EXISTING = 3, FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+        public const int FileFullDirectoryInfo = 14, FileFullDirectoryRestartInfo = 15;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr sa,
+            uint disposition, uint flags, IntPtr template);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        public static extern bool GetKernelObjectSecurity(Microsoft.Win32.SafeHandles.SafeFileHandle h, uint info, byte[] sd, uint len, out uint needed);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetFileInformationByHandleEx(Microsoft.Win32.SafeHandles.SafeFileHandle h, int infoClass, byte[] buf, uint size);
+
         // ---------------- Cuentas ----------------
         [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool LookupAccountSidW(string lpSystemName, byte[] Sid, StringBuilder lpName, ref int cchName,

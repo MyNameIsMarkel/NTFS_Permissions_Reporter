@@ -193,33 +193,78 @@ namespace NtfsReporter
             if (Interlocked.Decrement(ref live) == 0 && Completed != null) Completed();
         }
 
+        [ThreadStatic] static byte[] dirBuf;
+
         void Children(ScanItem it, object st)
+        {
+            int e = ChildrenBackup(it, st);
+            if (e == 0) return;
+            // Si el modo copia de seguridad no esta disponible (servidor antiguo, NAS...) se usa el metodo clasico
+            if (e != 5) e = ChildrenFind(it, st);
+            if (e != 0 && e != 2 && e != 18)
+            {
+                Interlocked.Increment(ref Errors);
+                if (EnumError != null) EnumError(new ScanItem { Path = it.Path, Depth = it.Depth, State = st }, e);
+            }
+        }
+
+        void Enqueue(ScanItem parent, object st, string name, uint attrs)
+        {
+            if ((attrs & 0x10) == 0) return;
+            if (name == "." || name == "..") return;
+            if ((attrs & 0x400) != 0 && !FollowReparse) return;
+            Interlocked.Increment(ref pending);
+            queue.Add(new ScanItem { Path = Paths.Join(parent.Path, name), Depth = parent.Depth + 1, State = st });
+        }
+
+        // Lista subcarpetas abriendo el directorio con FILE_FLAG_BACKUP_SEMANTICS (como robocopy /B)
+        int ChildrenBackup(ScanItem it, object st)
+        {
+            using (Microsoft.Win32.SafeHandles.SafeFileHandle h = Native.CreateFileW(Paths.Long(it.Path), Native.FILE_LIST_DIRECTORY | Native.SYNCHRONIZE,
+                       Native.FILE_SHARE_ALL, IntPtr.Zero, Native.OPEN_EXISTING, Native.FILE_FLAG_BACKUP_SEMANTICS, IntPtr.Zero))
+            {
+                if (h.IsInvalid) return Marshal.GetLastWin32Error();
+                byte[] buf = dirBuf;
+                if (buf == null) { buf = new byte[64 * 1024]; dirBuf = buf; }
+                int cls = Native.FileFullDirectoryRestartInfo;
+                while (true)
+                {
+                    if (!Native.GetFileInformationByHandleEx(h, cls, buf, (uint)buf.Length))
+                    {
+                        int err = Marshal.GetLastWin32Error();
+                        return err == 18 ? 0 : err; // 18 = no hay mas archivos
+                    }
+                    cls = Native.FileFullDirectoryInfo;
+                    int off = 0;
+                    while (true)
+                    {
+                        int next = BitConverter.ToInt32(buf, off);
+                        uint attrs = BitConverter.ToUInt32(buf, off + 56);
+                        int nameLen = BitConverter.ToInt32(buf, off + 60);
+                        if ((attrs & 0x10) != 0)
+                        {
+                            string name = System.Text.Encoding.Unicode.GetString(buf, off + 68, nameLen);
+                            Enqueue(it, st, name, attrs);
+                        }
+                        if (next == 0) break;
+                        off += next;
+                    }
+                }
+            }
+        }
+
+        int ChildrenFind(ScanItem it, object st)
         {
             Native.WIN32_FIND_DATA fd;
             IntPtr h = Native.FindFirstFileExW(Paths.Long(Paths.Join(it.Path, "*")), 1, out fd, 1, IntPtr.Zero, 2);
-            if (h == Native.INVALID_HANDLE)
-            {
-                int e = Marshal.GetLastWin32Error();
-                if (e != 2 && e != 18)
-                {
-                    Interlocked.Increment(ref Errors);
-                    if (EnumError != null) EnumError(new ScanItem { Path = it.Path, Depth = it.Depth, State = st }, e);
-                }
-                return;
-            }
+            if (h == Native.INVALID_HANDLE) return Marshal.GetLastWin32Error();
             try
             {
-                do
-                {
-                    if ((fd.dwFileAttributes & 0x10) == 0) continue;
-                    string n = fd.cFileName;
-                    if (n == "." || n == "..") continue;
-                    if ((fd.dwFileAttributes & 0x400) != 0 && !FollowReparse) continue;
-                    Interlocked.Increment(ref pending);
-                    queue.Add(new ScanItem { Path = Paths.Join(it.Path, n), Depth = it.Depth + 1, State = st });
-                } while (Native.FindNextFileW(h, out fd));
+                do { Enqueue(it, st, fd.cFileName, fd.dwFileAttributes); }
+                while (Native.FindNextFileW(h, out fd));
             }
             finally { Native.FindClose(h); }
+            return 0;
         }
     }
 
