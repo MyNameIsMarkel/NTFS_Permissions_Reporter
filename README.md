@@ -96,7 +96,7 @@ Requisitos: Windows 10/11 o Windows Server 2012 R2 o posterior, con .NET Framewo
 
 No hace falta Visual Studio: haz doble clic en **`build.bat`**. Usa el `csc.exe` que viene con Windows y genera `dist\NtfsPermissionsReporter.exe`.
 
-Cada vez que se sube una etiqueta `v*` (por ejemplo `v1.0.1`), GitHub Actions compila el ejecutable y lo publica en *Releases*. Con cada push a `main` lo deja como artefacto descargable en la pestaña *Actions*.
+Con cada push a `main`, GitHub Actions compila el ejecutable en Windows y lo publica en *Releases*. La versión se toma de `AssemblyVersion` en `src/Program.cs`: si la subes, por ejemplo a `1.1.0`, se crea una release nueva; si no la cambias, se actualiza el `.exe` de la release actual.
 
 ```
 src/
